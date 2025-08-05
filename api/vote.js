@@ -7,7 +7,8 @@ app.use(express.json());
 app.use(cors());
 
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }  // For Vercel-Supabase compatibility
 });
 
 module.exports = async (req, res) => {
