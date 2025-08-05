@@ -6,19 +6,20 @@ const app = express();
 app.use(cors());
 
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
 });
 
 module.exports = async (req, res) => {
-  const { imageFile } = req.params;  // Use params for dynamic route
+  const { imageFile } = req.params;
 
   try {
     const result = await pool.query('SELECT score FROM votes WHERE image_file = $1', [imageFile]);
     if (result.rows.length === 0) return res.json({ average: 0 });
 
     const sum = result.rows.reduce((acc, row) => acc + row.score, 0);
-    const average = sum / result.rows.length;
-    res.json({ average });
+    const average = (sum / result.rows.length).toFixed(2);  // Rounded to 2 decimals
+    res.json({ average: parseFloat(average) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ average: 0 });
