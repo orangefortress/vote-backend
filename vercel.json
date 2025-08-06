@@ -1,9 +1,15 @@
 {
   "version": 2,
-  "functions": {
-    "hello.js": {
-      "memory": 1024,
-      "maxDuration": 10
+  "builds": [
+    {
+      "src": "hello.js",
+      "use": "@vercel/node"
     }
-  }
+  ],
+  "routes": [
+    {
+      "src": "/hello",
+      "dest": "/hello.js"
+    }
+  ]
 }
