@@ -4,12 +4,30 @@
     {
       "src": "hello.js",
       "use": "@vercel/node"
+    },
+    {
+      "src": "api/**/*.js",
+      "use": "@vercel/node"
     }
   ],
   "routes": [
     {
       "src": "/hello",
       "dest": "/hello.js"
+    },
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/$1"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/api/$1"
     }
-  ]
+  ],
+  "functions": {
+    "api/static.js": {
+      "memory": 1024,
+      "maxDuration": 10
+    }
+  }
 }
