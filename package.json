@@ -1,9 +1,11 @@
 {
   "name": "vote-backend",
   "version": "1.0.0",
-  "description": "Simple backend for voting",
+  "description": "Vote on Your Favorite Classic",
   "engines": {
     "node": ">=14"
   },
-  "dependencies": {}
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4"
+  }
 }
