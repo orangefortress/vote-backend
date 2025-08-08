@@ -12,6 +12,10 @@
     {
       "src": "/api/vote/(.*)",
       "dest": "/api/vote/[id].js"
+    },
+    {
+      "src": "/api/votes",
+      "dest": "/api/votes.js"
     }
   ]
 }
