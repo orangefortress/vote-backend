@@ -1,9 +1,7 @@
 {
   "name": "vote-backend-vercel",
   "version": "1.0.0",
-  "scripts": {
-    "vercel-build": "echo 'Build complete'"
-  },
+  "description": "Test backend",
   "dependencies": {},
   "engines": {
     "node": ">=14"
