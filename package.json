@@ -1,9 +1,9 @@
 {
-  "name": "vote-backend-vercel",
+  "name": "vote-backend",
   "version": "1.0.0",
-  "description": "Test backend",
-  "dependencies": {},
+  "description": "Simple backend for voting",
   "engines": {
     "node": ">=14"
-  }
+  },
+  "dependencies": {}
 }
