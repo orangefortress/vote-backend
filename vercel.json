@@ -19,11 +19,5 @@
       "src": "/api/(.*)",
       "dest": "/api/$1"
     }
-  ],
-  "functions": {
-    "api/static.js": {
-      "memory": 1024,
-      "maxDuration": 10
-    }
-  }
-} 
+  ]
+}
