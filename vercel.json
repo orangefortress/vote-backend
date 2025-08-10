@@ -1,29 +1,13 @@
 {
   "version": 2,
-  "routes": [
+  "headers": [
     {
-      "src": "/hello",
-      "dest": "/hello.js"
-    },
-    {
-      "src": "/api/(.*)",
-      "dest": "/api/$1"
-    },
-    {
-      "src": "/api/vote/(.*)",
-      "dest": "/api/vote/[id].js"
-    },
-    {
-      "src": "/api/votes",
-      "dest": "/api/votes.js"
-    },
-    {
-      "src": "/public/(.*)",
-      "dest": "/public/$1"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/index.html"
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Access-Control-Allow-Methods", "value": "GET, POST, OPTIONS" },
+        { "key": "Access-Control-Allow-Headers", "value": "Content-Type" }
+      ]
     }
   ]
 }
