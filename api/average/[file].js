@@ -3,12 +3,10 @@ const { createClient } = require('@supabase/supabase-js');
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
 module.exports = async (req, res) => {
-  // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  // Handle preflight requests
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
@@ -24,6 +22,7 @@ module.exports = async (req, res) => {
     .eq('image_file', file);
 
   if (error) {
+    console.error(error);
     return res.status(500).json({ error: 'Database error', detail: error.message });
   }
 
