@@ -5,7 +5,6 @@ const ALLOWED_ORIGINS = process.env.CORS_ORIGINS
   : ["*"]; // e.g. "https://yourdomain.com,https://www.yourdomain.com"
 
 function corsHeaders(origin) {
-  // If explicit list provided, echo back the requesting origin when matched
   const allowOrigin =
     ALLOWED_ORIGINS.length === 1 && ALLOWED_ORIGINS[0] === "*"
       ? "*"
@@ -25,17 +24,14 @@ module.exports = async (req, res) => {
   const origin = req.headers.origin || "";
   const headers = corsHeaders(origin);
 
-  // Handle preflight
   if (req.method === "OPTIONS") {
     return res.status(200).set(headers).end();
   }
-
   if (req.method !== "POST") {
     return res.status(405).set(headers).json({ error: "Method Not Allowed" });
   }
 
   try {
-    // Parse JSON body safely (Vercel can give object or string depending on config)
     let body = req.body;
     if (!body || typeof body !== "object") {
       if (typeof req.body === "string") {
@@ -60,7 +56,7 @@ module.exports = async (req, res) => {
     }
 
     const SUPABASE_URL = process.env.SUPABASE_URL;
-    const SUPABASE_KEY = process.env.SUPABASE_KEY; // anon is fine if RLS permits
+    const SUPABASE_KEY = process.env.SUPABASE_KEY;
     if (!SUPABASE_URL || !SUPABASE_KEY) {
       return res.status(500).set(headers).json({ error: "Missing Supabase env vars" });
     }
