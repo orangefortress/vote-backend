@@ -17,7 +17,6 @@ module.exports = async (req, res) => {
   if (req.method === "OPTIONS") {
     return res.status(200).set(headers).end();
   }
-
   if (req.method !== "GET") {
     return res.status(405).set(headers).json({ error: "Method Not Allowed" });
   }
@@ -35,7 +34,6 @@ module.exports = async (req, res) => {
   const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
   try {
-    // Get rows and compute avg client-side (keeps it simple for anon key)
     const { data, error } = await supabase
       .from("votes")
       .select("score")
