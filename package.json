@@ -1,7 +1,15 @@
+
+---
+
+## backend/package.json
+
+```json
 {
   "name": "vote-backend",
   "version": "1.0.0",
+  "private": true,
+  "license": "MIT",
   "dependencies": {
-    "@supabase/supabase-js": "^2.45.4"
+    "@supabase/supabase-js": "^2.45.0"
   }
 }
