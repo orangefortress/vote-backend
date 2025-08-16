@@ -1,9 +1,3 @@
-
----
-
-## backend/package.json
-
-```json
 {
   "name": "vote-backend",
   "version": "1.0.0",
