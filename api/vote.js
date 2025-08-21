@@ -21,10 +21,9 @@ function getSupabase() {
 module.exports = async (req, res) => {
   const headers = cors();
 
-  // Preflight
   if (req.method === "OPTIONS") return res.status(204).set(headers).end();
 
-  // Health probe: GET /api/vote
+  // Health: GET /api/vote
   if (req.method === "GET") {
     const haveEnv = { SUPABASE_URL: !!process.env.SUPABASE_URL, SUPABASE_KEY: !!process.env.SUPABASE_KEY };
     const { supabase, error } = getSupabase();
@@ -36,10 +35,11 @@ module.exports = async (req, res) => {
         .select("*", { head: true, count: "exact" })
         .limit(0);
 
-      if (dbErr) return res.status(500).set(headers).json({
-        ok: false, haveEnv, db_ok: false, error: "Supabase error on table 'votes': " + dbErr.message
-      });
-
+      if (dbErr) {
+        return res.status(500).set(headers).json({
+          ok: false, haveEnv, db_ok: false, error: "Supabase error on table 'votes': " + dbErr.message
+        });
+      }
       return res.status(200).set(headers).json({ ok: true, haveEnv, db_ok: true, votes_count_sample: count });
     } catch (e) {
       return res.status(500).set(headers).json({
