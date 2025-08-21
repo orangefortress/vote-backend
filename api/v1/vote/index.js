@@ -25,7 +25,7 @@ async function supabaseFetch(path, opts = {}) {
     apikey: key,
     Authorization: "Bearer " + key,
     "Content-Type": "application/json",
-    "Prefer": "return=representation",
+    // Upsert needs both return and resolution headers when we use it
     ...(opts.headers || {})
   };
   const res = await fetch(url, { ...opts, headers });
@@ -36,37 +36,30 @@ async function supabaseFetch(path, opts = {}) {
 
 export default async function handler(req, res) {
   try {
-    // CORS / preflight
     if (req.method === "OPTIONS") {
       Object.entries(corsHeaders).forEach(([k, v]) => res.setHeader(k, v));
       return res.status(204).end();
     }
     Object.entries(corsHeaders).forEach(([k, v]) => res.setHeader(k, v));
 
+    // Health: GET /api/v1/vote
     if (req.method === "GET") {
       const env = haveEnv();
       if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
         return res.status(500).json({ ok: false, haveEnv: env, db_ok: false, error: "Missing env vars" });
       }
-      // Tiny probe: read 1 id to confirm table reachability (and get a clear REST error if not)
       const r = await supabaseFetch("/votes?select=id&limit=1", { method: "GET", headers: { Prefer: "count=exact" } });
-      if (!r.ok) {
-        return res.status(r.status).json({ ok: false, haveEnv: env, db_ok: false, error: "Supabase REST error on votes", detail: r.json });
-      }
+      if (!r.ok) return res.status(r.status).json({ ok: false, haveEnv: env, db_ok: false, error: "Supabase REST error on votes", detail: r.json });
       return res.status(200).json({
-        ok: true,
-        haveEnv: env,
-        db_ok: true,
+        ok: true, haveEnv: env, db_ok: true,
         note: "Using Supabase REST via fetch (no npm deps).",
         sample_rows_returned: Array.isArray(r.json) ? r.json.length : null
       });
     }
 
-    if (req.method !== "POST") {
-      return res.status(405).json({ error: "Method Not Allowed" });
-    }
+    if (req.method !== "POST") return res.status(405).json({ error: "Method Not Allowed" });
 
-    // POST
+    // POST (UPSERT by image_file + user_ip)
     let body = req.body;
     if (!body || typeof body !== "object") {
       try { body = JSON.parse(req.body); } catch { body = null; }
@@ -83,14 +76,22 @@ export default async function handler(req, res) {
     }
 
     const user_ip = (req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "").split(",")[0].trim();
-    const payload = [{ image_file: imageFile.trim(), score: nScore, user_ip }];
+    const payload = [{ image_file: imageFile.trim(), user_ip, score: nScore }];
 
-    const r = await supabaseFetch("/votes", { method: "POST", body: JSON.stringify(payload) });
+    // Key bit: on_conflict + Prefer: resolution=merge-duplicates does an UPSERT
+    const r = await supabaseFetch("/votes?on_conflict=image_file,user_ip", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      headers: {
+        Prefer: "return=representation,resolution=merge-duplicates"
+      }
+    });
+
     if (!r.ok) {
-      return res.status(r.status).json({ error: "Supabase insert error (REST)", detail: r.json });
+      return res.status(r.status).json({ error: "Supabase upsert error (REST)", detail: r.json });
     }
 
-    return res.status(200).json({ success: true, rows: r.json });
+    return res.status(200).json({ success: true, rows: r.json, upserted: true });
   } catch (e) {
     return res.status(500).json({ error: e?.message || "Server error (handler)" });
   }
