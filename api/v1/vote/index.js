@@ -1,4 +1,4 @@
-// ESM + dependency-free Supabase REST
+// ESM + dependency-free Supabase REST (device_id-aware upsert)
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Vary": "Origin",
@@ -25,7 +25,6 @@ async function supabaseFetch(path, opts = {}) {
     apikey: key,
     Authorization: "Bearer " + key,
     "Content-Type": "application/json",
-    // Upsert needs both return and resolution headers when we use it
     ...(opts.headers || {})
   };
   const res = await fetch(url, { ...opts, headers });
@@ -42,7 +41,7 @@ export default async function handler(req, res) {
     }
     Object.entries(corsHeaders).forEach(([k, v]) => res.setHeader(k, v));
 
-    // Health: GET /api/v1/vote
+    // Health check
     if (req.method === "GET") {
       const env = haveEnv();
       if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
@@ -59,14 +58,14 @@ export default async function handler(req, res) {
 
     if (req.method !== "POST") return res.status(405).json({ error: "Method Not Allowed" });
 
-    // POST (UPSERT by image_file + user_ip)
+    // Parse body
     let body = req.body;
     if (!body || typeof body !== "object") {
       try { body = JSON.parse(req.body); } catch { body = null; }
     }
     if (!body) return res.status(400).json({ error: "Invalid JSON body" });
 
-    const { imageFile, score } = body;
+    const { imageFile, score, device_id } = body;
     const nScore = Number(score);
     if (typeof imageFile !== "string" || !imageFile.trim()) {
       return res.status(400).json({ error: "imageFile is required" });
@@ -76,22 +75,27 @@ export default async function handler(req, res) {
     }
 
     const user_ip = (req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "").split(",")[0].trim();
-    const payload = [{ image_file: imageFile.trim(), user_ip, score: nScore }];
 
-    // Key bit: on_conflict + Prefer: resolution=merge-duplicates does an UPSERT
-    const r = await supabaseFetch("/votes?on_conflict=image_file,user_ip", {
-      method: "POST",
-      body: JSON.stringify(payload),
-      headers: {
-        Prefer: "return=representation,resolution=merge-duplicates"
-      }
-    });
-
-    if (!r.ok) {
-      return res.status(r.status).json({ error: "Supabase upsert error (REST)", detail: r.json });
+    // If we have a device_id, upsert by (image_file, device_id). Else, fallback to (image_file, user_ip).
+    if (device_id && typeof device_id === "string" && device_id.length <= 100) {
+      const payload = [{ image_file: imageFile.trim(), device_id, score: nScore, user_ip }];
+      const r = await supabaseFetch("/votes?on_conflict=image_file,device_id", {
+        method: "POST",
+        body: JSON.stringify(payload),
+        headers: { Prefer: "return=representation,resolution=merge-duplicates" }
+      });
+      if (!r.ok) return res.status(r.status).json({ error: "Supabase upsert error (device_id)", detail: r.json });
+      return res.status(200).json({ success: true, rows: r.json, via: "device_id" });
+    } else {
+      const payload = [{ image_file: imageFile.trim(), score: nScore, user_ip }];
+      const r = await supabaseFetch("/votes?on_conflict=image_file,user_ip", {
+        method: "POST",
+        body: JSON.stringify(payload),
+        headers: { Prefer: "return=representation,resolution=merge-duplicates" }
+      });
+      if (!r.ok) return res.status(r.status).json({ error: "Supabase upsert error (user_ip)", detail: r.json });
+      return res.status(200).json({ success: true, rows: r.json, via: "ip" });
     }
-
-    return res.status(200).json({ success: true, rows: r.json, upserted: true });
   } catch (e) {
     return res.status(500).json({ error: e?.message || "Server error (handler)" });
   }
