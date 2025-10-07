@@ -1,6 +1,7 @@
 // api/v1/leaderboard.js
-// Node.js serverless function for Vercel (NOT Edge).
-// Fetch zap receipts for a single Nostr note (tip-jar post) and return top tippers + total sats.
+// Fetch zap receipts (kind:9735) for ONE note id (note/nevent/hex).
+// 1) Try indexer (nostr.wine). 2) Fallback to a short relay sweep (server-side).
+// Returns: { ok, note_id, total_sats, top: [{pubkey, sats}] }
 
 const DEFAULT_RELAYS = [
   'wss://relay.damus.io','wss://relay.snort.social','wss://nos.lol','wss://eden.nostr.land','wss://nostr.wine',
@@ -9,9 +10,9 @@ const DEFAULT_RELAYS = [
 ];
 
 // ---- tiny bech32 decode (note/nevent) ----
-const CH='qpzry9x8gf2tvdw0s3jn54khce6mua7l'; const MAP={}; for (let i=0;i<CH.length;i++) MAP[CH[i]]=i;
+const CH='qpzry9x8gf2tvdw0s3jn54khce6mua7l'; const MAP={}; for(let i=0;i<CH.length;i++) MAP[CH[i]]=i;
 const hrpExpand = hrp => { const r=[]; for(let i=0;i<hrp.length;i++) r.push(hrp.charCodeAt(i)>>5); r.push(0); for(let i=0;i<hrp.length;i++) r.push(hrp.charCodeAt(i)&31); return r; };
-const polymod = v => { let c=1; for (const x of v){ const b=c>>>25; c=((c&0x1ffffff)<<5)^x;
+const polymod = v => { let c=1; for(const x of v){ const b=c>>>25; c=((c&0x1ffffff)<<5)^x;
   if(b&1)c^=0x3b6a57b2; if(b&2)c^=0x26508e6d; if(b&4)c^=0x1ea119fa; if(b&8)c^=0x3d4233dd; if(b&16)c^=0x2a1462b3; } return c; };
 function bech32Decode(str){ const pos=str.lastIndexOf('1'); if(pos<1) throw new Error('bech32'); const hrp=str.slice(0,pos); const data=str.slice(pos+1);
   const vals=[]; for(const ch of data){ if(!(ch in MAP)) throw new Error('char'); vals.push(MAP[ch]); }
@@ -42,8 +43,7 @@ function parseNoteId(input){
   return null;
 }
 
-// ---- indexer #1: nostr.wine search (best-effort) ----
-// We attempt multiple queries; API is documented for generic search, not tags, so we try patterns.
+// ---- indexer: nostr.wine ----
 async function fetchFromIndexer(eventHex, signal){
   const base='https://api.nostr.wine/search';
   const tries = [
@@ -56,18 +56,16 @@ async function fetchFromIndexer(eventHex, signal){
       const r = await fetch(url, { signal, headers: { 'accept':'application/json' }});
       if(!r.ok) continue;
       const j = await r.json();
-      // expect j.events array or j.data; accept both
       const arr = j?.events || j?.data || [];
-      if(!Array.isArray(arr) || !arr.length) continue;
-      return arr;
-    }catch{ /* try next */ }
+      if(Array.isArray(arr) && arr.length) return arr;
+    }catch{}
   }
   return [];
 }
 
 // ---- fallback: short server-side relay scan via nostr-tools ----
 async function fetchFromRelays(eventHex, signal){
-  const { SimplePool } = await import('nostr-tools'); // npm dep
+  const { SimplePool } = await import('nostr-tools'); // npm dep (must be in package.json)
   const pool = new SimplePool();
   const relays = (process.env.LEADERBOARD_RELAYS || '')
     .split(/[,\s]+/).map(s=>s.trim()).filter(Boolean);
@@ -78,15 +76,12 @@ async function fetchFromRelays(eventHex, signal){
   return await new Promise(resolve=>{
     const timer = setTimeout(() => { try{sub.unsub();}catch{} try{pool.close(urls);}catch{} resolve(events); }, 5000);
     sub.on('event', (ev)=>{ events.push(ev); });
-    sub.on('eose', ()=>{ /* multiple EOSEs will arrive; let timer end */ });
-    // stop early if aborted
+    sub.on('eose', ()=>{ /* let timer end */ });
     signal?.addEventListener?.('abort', ()=>{ clearTimeout(timer); try{sub.unsub();}catch{} try{pool.close(urls);}catch{} resolve(events); });
   });
 }
 
-// ---- helpers ----
 function msatsFromZap(ev){
-  // NIP-57: amount tag is millisats
   const t = Array.isArray(ev.tags)? ev.tags.find(t=>t[0]==='amount' && t[1]) : null;
   const n = t ? Number(t[1]) : 0;
   return Number.isFinite(n) ? n : 0;
@@ -98,8 +93,7 @@ function aggregate(events){
     const ms = msatsFromZap(ev);
     if(!ms) continue;
     totalMsats += ms;
-    const k = ev.pubkey;
-    byPub.set(k, (byPub.get(k)||0) + ms);
+    byPub.set(ev.pubkey, (byPub.get(ev.pubkey)||0) + ms);
   }
   const top = [...byPub.entries()]
     .sort((a,b)=>b[1]-a[1])
@@ -121,14 +115,10 @@ export default async function handler(req, res){
     const { signal } = ac;
     const timeout = setTimeout(()=>ac.abort(), 12000);
 
-    // 1) Try indexer
     let events = await fetchFromIndexer(eventHex, signal);
-
-    // 2) Fallback: short relay scan server-side
-    if(!events || events.length===0){
+    if(!events || !events.length){
       events = await fetchFromRelays(eventHex, signal);
     }
-
     clearTimeout(timeout);
 
     const agg = aggregate(events || []);
