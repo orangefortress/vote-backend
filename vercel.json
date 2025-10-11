@@ -11,4 +11,13 @@
       ]
     }
   ]
+  "functions": {
+    "api/reconcile-zaps.js": {
+      "maxDuration": 30,
+      "memory": 256
+    }
+  }
+  "crons": [
+    { "path": "/api/reconcile-zaps", "schedule": "*/2 * * * *" }
+  ]
 }
