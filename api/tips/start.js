@@ -1,30 +1,28 @@
 // api/tips/start.js
 export const config = { runtime: 'nodejs18.x' };
 
-// --- helpers ---
 const { SUPABASE_URL, SUPABASE_SERVICE_ROLE } = process.env;
 
-function bad(res, code, msg) {
-  res.status(code).json({ ok: false, error: msg });
-}
+function bad(res, code, msg) { res.status(code).json({ ok: false, error: msg }); }
 
-async function supa(path, opts = {}) {
-  const url = `${SUPABASE_URL}/rest/v1/${path}`;
+async function supa(path, { method = 'GET', body, params, headers } = {}) {
+  const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+  const url = `${SUPABASE_URL}/rest/v1/${path}${qs}`;
   const r = await fetch(url, {
-    ...opts,
+    method,
     headers: {
       apikey: SUPABASE_SERVICE_ROLE,
       Authorization: `Bearer ${SUPABASE_SERVICE_ROLE}`,
       'Content-Type': 'application/json',
-      ...opts.headers
-    }
+      ...headers
+    },
+    body: body ? JSON.stringify(body) : undefined
   });
   const text = await r.text();
   let json = null;
-  try { json = text ? JSON.parse(text) : null; } catch { json = null; }
+  try { json = text ? JSON.parse(text) : null; } catch { /* ignore */ }
   if (!r.ok) {
-    const m = json?.message || json?.error || text || 'supabase error';
-    throw new Error(`${r.status} ${m}`);
+    throw new Error(`${r.status} ${json?.message || json?.error || text || 'supabase error'}`);
   }
   return json;
 }
@@ -43,12 +41,12 @@ export default async function handler(req, res) {
 
     const {
       device_id,
-      intent_id,             // optional; if not provided, server will set one
-      target_type,           // 'page' | 'image'
-      target_id,             // e.g. 'img3' (required if target_type==='image')
-      display_name,          // optional
-      amount_sats,           // integer
-      client_ts              // ISO string (optional)
+      intent_id,
+      target_type,   // 'page' | 'image'
+      target_id,     // required if image
+      display_name,
+      amount_sats,
+      client_ts
     } = body || {};
 
     if (!device_id || !target_type || !amount_sats) {
@@ -71,17 +69,23 @@ export default async function handler(req, res) {
       updated_at: nowIso
     };
 
-    // Upsert single active pending per device:
-    // Strategy:
-    // 1) Mark any existing 'pending' for this device as 'superseded'
+    // 1) Supersede any previous pending for this device
     await supa('pending_tips', {
       method: 'PATCH',
+      params: { device_id: `eq.${device_id}`, status: 'eq.pending' },
       headers: { Prefer: 'return=minimal' },
-      body: JSON.stringify({ status: 'superseded', updated_at: nowIso }),
-      // filter: device_id=eq.<id>&status=eq.pending
-    // Note: Supabase REST uses query string filters:
-    }) // We add filters via URL
+      body: { status: 'superseded', updated_at: nowIso }
+    });
+
+    // 2) Insert the new pending
+    const inserted = await supa('pending_tips', {
+      method: 'POST',
+      headers: { Prefer: 'return=representation' },
+      body: payload
+    });
+
+    res.status(200).json({ ok: true, pending: inserted?.[0] || null });
   } catch (e) {
-    // We'll rework with query param version to support filters
+    res.status(500).json({ ok: false, error: e.message });
   }
 }
