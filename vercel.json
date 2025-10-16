@@ -1,4 +1,7 @@
 {
+  "functions": {
+    "api/**/*.js": { "runtime": "nodejs" }
+  },
   "headers": [
     {
       "source": "/api/(.*)",
@@ -10,14 +13,5 @@
         { "key": "Access-Control-Max-Age", "value": "86400" }
       ]
     }
-  ]
-  "functions": {
-    "api/reconcile-zaps.js": {
-      "maxDuration": 30,
-      "memory": 256
-    }
-  }
-  "crons": [
-    { "path": "/api/reconcile-zaps", "schedule": "*/2 * * * *" }
   ]
 }
