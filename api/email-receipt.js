@@ -6,7 +6,9 @@ export const config = { runtime: 'nodejs' };
 
 export default async function handler(req, res) {
   try {
-    if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Use POST' });
+    if (req.method !== 'POST') {
+      return res.status(405).json({ ok: false, error: 'Use POST' });
+    }
 
     // --- Secret check ---
     const secret =
@@ -17,14 +19,13 @@ export default async function handler(req, res) {
 
     // --- Normalize body ---
     const b = (typeof req.body === 'object' && req.body) || {};
-    const from     = (b.from || b.sender || '').toString();
-    const subject  = (b.subject || '').toString();
-    const text     = (b.text || b['body-plain'] || b.body || '').toString();
-    const html     = (b.html || b['body-html'] || '').toString();
-    const to       = (b.to || b.recipients || '').toString();
-    const bodyAll  = `${subject}\n${text}\n${html}`;
+    const from    = (b.from || b.sender || '').toString();
+    const subject = (b.subject || '').toString();
+    const text    = (b.text || b['body-plain'] || b.body || '').toString();
+    const html    = (b.html || b['body-html'] || '').toString();
+    const bodyAll = `${subject}\n${text}\n${html}`;
 
-    // --- Optional sender allow list ---
+    // --- Optional allowlist ---
     const ALLOW = (process.env.EMAIL_ALLOW_LIST || '').toLowerCase();
     if (ALLOW) {
       const okSender = ALLOW.split(',').map(s => s.trim()).filter(Boolean)
@@ -56,11 +57,9 @@ export default async function handler(req, res) {
       if (!isNaN(+t)) receivedAt = t;
     }
 
-    // ---- Match pending ----
     const windowMinutes = Number(process.env.RECEIPT_MATCH_MINUTES || '15');
     const sinceIso = new Date(receivedAt.getTime() - windowMinutes * 60_000).toISOString();
     const untilIso = new Date(receivedAt.getTime() + windowMinutes * 60_000).toISOString();
-
     const tol = Math.min(Math.max(Math.round(sats * 0.10), 20), 1200);
 
     const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -77,23 +76,30 @@ export default async function handler(req, res) {
         }
       });
       const text = await r.text();
-      let json = null;
-      try { json = text ? JSON.parse(text) : null; } catch {}
+      let json = null; try { json = text ? JSON.parse(text) : null; } catch {}
       return { ok: r.ok, status: r.status, data: json, raw: text };
     }
 
-    // ---- Pull candidates from pending_tips ----
-    const qp = new URLSearchParams({
-      status: 'eq.pending',
-      intent_at: `gte.${sinceIso}`,
-      order: 'intent_at.desc',
-      select: '*'        // <-- important fix!
-    }).toString();
+    // --- Explicit PostgREST query (with select=*) ---
+    const pendPath =
+      `/pending_tips` +
+      `?select=*` +
+      `&status=eq.pending` +
+      `&intent_at=gte.${encodeURIComponent(sinceIso)}` +
+      `&order=intent_at.desc`;
 
-    const { ok: okPend, data: pend } = await sb(`/pending_tips?${qp}`, { method: 'GET' });
-    if (!okPend) return res.status(500).json({ ok: false, error: 'pending fetch failed' });
+    const pendResp = await sb(pendPath, { method: 'GET' });
+    if (!pendResp.ok) {
+      return res.status(500).json({
+        ok: false,
+        error: 'pending fetch failed',
+        status: pendResp.status,
+        detail: pendResp.data || pendResp.raw || null,
+        path: pendPath
+      });
+    }
 
-    const candidates = (pend || []).filter(p => {
+    const candidates = (pendResp.data || []).filter(p => {
       if (p.intent_at > untilIso) return false;
       const amt = Number(p.amount_sats || 0);
       return Math.abs(amt - sats) <= tol;
@@ -121,19 +127,24 @@ export default async function handler(req, res) {
       source_received_at: receivedAt.toISOString()
     };
 
-    const ins = await sb('/confirmed_tips', {
-      method: 'POST',
-      body: JSON.stringify(confirmRow)
-    });
-    if (!ins.ok)
-      return res.status(500).json({ ok: false, error: 'confirm insert failed', detail: ins.data || ins.raw });
+    const ins = await sb('/confirmed_tips', { method: 'POST', body: JSON.stringify(confirmRow) });
+    if (!ins.ok) {
+      return res.status(500).json({
+        ok: false, error: 'confirm insert failed',
+        status: ins.status, detail: ins.data || ins.raw || null
+      });
+    }
 
     const upd = await sb(`/pending_tips?id=eq.${encodeURIComponent(best.id)}`, {
       method: 'PATCH',
       body: JSON.stringify({ status: 'confirmed', updated_at: new Date().toISOString() })
     });
-    if (!upd.ok)
-      return res.status(500).json({ ok: false, error: 'pending update failed', detail: upd.data || upd.raw });
+    if (!upd.ok) {
+      return res.status(500).json({
+        ok: false, error: 'pending update failed',
+        status: upd.status, detail: upd.data || upd.raw || null
+      });
+    }
 
     await sb(`/pending_tips?device_id=eq.${encodeURIComponent(best.device_id)}&status=eq.pending`, {
       method: 'PATCH',
