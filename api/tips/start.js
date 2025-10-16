@@ -1,9 +1,11 @@
 // api/tips/start.js
-export const config = { runtime: 'nodejs18.x' };
+export const config = { runtime: 'nodejs' };
 
 const { SUPABASE_URL, SUPABASE_SERVICE_ROLE } = process.env;
 
-function bad(res, code, msg) { res.status(code).json({ ok: false, error: msg }); }
+function bad(res, code, msg) {
+  res.status(code).json({ ok: false, error: msg });
+}
 
 async function supa(path, { method = 'GET', body, params, headers } = {}) {
   const qs = params ? '?' + new URLSearchParams(params).toString() : '';
@@ -20,24 +22,31 @@ async function supa(path, { method = 'GET', body, params, headers } = {}) {
   });
   const text = await r.text();
   let json = null;
-  try { json = text ? JSON.parse(text) : null; } catch { /* ignore */ }
-  if (!r.ok) {
-    throw new Error(`${r.status} ${json?.message || json?.error || text || 'supabase error'}`);
-  }
+  try { json = text ? JSON.parse(text) : null; } catch {}
+  if (!r.ok) throw new Error(`${r.status} ${json?.message || json?.error || text || 'supabase error'}`);
   return json;
 }
 
 export default async function handler(req, res) {
   try {
     if (req.method !== 'POST') return bad(res, 405, 'Use POST');
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE) return bad(res, 500, 'Missing Supabase env');
 
-    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE) {
-      return bad(res, 500, 'Missing Supabase env');
+    // Robust body parsing
+    let body = req.body;
+    if (!body || typeof body !== 'object') {
+      try {
+        let data = '';
+        await new Promise(resolve => {
+          req.on('data', c => (data += c));
+          req.on('end', resolve);
+        });
+        body = JSON.parse(data || '{}');
+      } catch {
+        body = null;
+      }
     }
-
-    const body = await (async () => {
-      try { return await req.json(); } catch { return null; }
-    })();
+    if (!body) return bad(res, 400, 'Invalid JSON body');
 
     const {
       device_id,
@@ -49,12 +58,10 @@ export default async function handler(req, res) {
       client_ts
     } = body || {};
 
-    if (!device_id || !target_type || !amount_sats) {
+    if (!device_id || !target_type || !amount_sats)
       return bad(res, 400, 'device_id, target_type, amount_sats required');
-    }
-    if (target_type === 'image' && !target_id) {
+    if (target_type === 'image' && !target_id)
       return bad(res, 400, 'target_id required for image tips');
-    }
 
     const nowIso = new Date().toISOString();
     const payload = {
