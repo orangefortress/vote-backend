@@ -2,7 +2,7 @@
 // Accepts ForwardEmail webhook POSTs for *@worshipbitcoin.com.
 // Parses sats + timestamp and confirms the nearest pending tip in Supabase.
 
-export const config = { runtime: 'nodejs20.x' };
+export const config = { runtime: 'nodejs' };
 
 export default async function handler(req, res) {
   try {
