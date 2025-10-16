@@ -1,5 +1,5 @@
 // api/tips/start.js
-export const config = { runtime: 'nodejs' };
+export const config = { runtime: 'nodejs20.x' };
 
 const { SUPABASE_URL, SUPABASE_SERVICE_ROLE } = process.env;
 
