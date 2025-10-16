@@ -1,0 +1,13 @@
+# Ignore everything except the active API set
+*.md
+scripts/
+tests/
+docs/
+api/reconcile-*
+api/hello.js
+api/ping.js
+api/static.js
+api/vote.js
+api/average/
+api/v1/leaderboard.js
+api/image/
