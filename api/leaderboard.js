@@ -22,7 +22,7 @@ async function sb(path, init) {
 
 export default async function handler(req, res){
   try{
-    if(!SUPABASE_URL || !SUPABASE_SERVICE_ROLE) return bad(res,500,'Missing Supabase env');
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE) return bad(res, 500, 'Missing Supabase env');
 
     // Optional ?range=24h|7d|30d|all
     const range = (req.query.range || 'all').toLowerCase();
@@ -32,20 +32,32 @@ export default async function handler(req, res){
       range === '7d'  ? new Date(now - 7*24*60*60*1000).toISOString() :
       range === '30d' ? new Date(now - 30*24*60*60*1000).toISOString() : null;
 
-    // Build PostgREST query to aggregate by display_name
-    let path = `/confirmed_tips?select=who:display_name,sats:sum.amount_sats&group=display_name&order=sats.desc&limit=20`;
+    // Pull recent confirmations; we’ll aggregate in JS (robust + RLS-safe).
+    let path = `/confirmed_tips?select=display_name,amount_sats,confirmed_at&order=confirmed_at.desc&limit=2000`;
     if (sinceIso) path += `&confirmed_at=gte.${encodeURIComponent(sinceIso)}`;
 
-    const resp = await sb(path, { method:'GET' });
-    if (!resp.ok) return res.status(500).json({ ok:false, error:'supabase fetch failed', detail: resp.data || resp.raw });
+    const resp = await sb(path, { method: 'GET' });
+    if (!resp.ok) {
+      return res.status(500).json({ ok:false, error:'supabase fetch failed', detail: resp.data || resp.raw });
+    }
 
-    const rows = (resp.data || []).map(r => ({
-      who: (r.who && r.who.trim()) ? r.who : 'Anonymous',
-      sats: Number(r.sats||0)
-    })).sort((a,b)=>b.sats-a.sats);
+    const rows = Array.isArray(resp.data) ? resp.data : [];
 
-    res.status(200).json({ ok:true, rows });
-  }catch(e){
-    res.status(500).json({ ok:false, error:e.message });
+    // Aggregate by display_name (fallback to 'Anonymous' if empty/null)
+    const byWho = new Map();
+    for (const r of rows) {
+      const who = (r.display_name && String(r.display_name).trim()) || 'Anonymous';
+      const sats = Number(r.amount_sats || 0);
+      byWho.set(who, (byWho.get(who) || 0) + sats);
+    }
+
+    const top = [...byWho.entries()]
+      .map(([who, sats]) => ({ who, sats }))
+      .sort((a,b)=>b.sats - a.sats)
+      .slice(0, 20);
+
+    res.status(200).json({ ok:true, rows: top });
+  } catch (e) {
+    res.status(500).json({ ok:false, error: e.message });
   }
 }
