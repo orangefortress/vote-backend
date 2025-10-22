@@ -17,7 +17,6 @@ function send(res, code, body) {
 }
 
 function escLiteral(s = '') {
-  // minimal escape for SQL single-quoted string literal
   return String(s).replace(/'/g, "''");
 }
 
@@ -34,8 +33,7 @@ async function execSQL(sql) {
   });
   const j = await r.json().catch(() => null);
   if (!r.ok) {
-    const msg = j?.message || 'rpc error';
-    const err = new Error(msg);
+    const err = new Error(j?.message || 'rpc error');
     err.detail = j;
     throw err;
   }
@@ -50,7 +48,6 @@ export default async function handler(req, res) {
       return send(res, 500, { ok: false, error: 'Missing Supabase env' });
     }
 
-    // range filter
     const range = String(req.query.range || 'all').toLowerCase();
     const whereRange =
       range === '24h' ? "AND confirmed_at >= now() - interval '24 hours'" :
@@ -58,15 +55,13 @@ export default async function handler(req, res) {
       range === '30d' ? "AND confirmed_at >= now() - interval '30 days'" :
                         '';
 
-    // target filter (per-image)
     const target = String(req.query.target || '').toLowerCase();
-    const target_id = String(req.query.target_id || '');
+    const target_id = String(req.query.target || req.query.target_id || '');
     const limit = Math.max(1, Math.min(50, Number(req.query.limit || 20)));
 
     let sql;
 
     if (target === 'image' && target_id) {
-      // Per-image top tippers (use display_name fallback to pubkey snippet)
       const tid = escLiteral(target_id);
       sql = `
         SELECT
@@ -78,10 +73,9 @@ export default async function handler(req, res) {
           ${whereRange}
         GROUP BY who
         ORDER BY sats DESC
-        LIMIT ${limit};
+        LIMIT ${limit}
       `;
     } else {
-      // Global top tippers (existing behavior)
       sql = `
         SELECT
           COALESCE(NULLIF(display_name,''), LEFT(payer_pubkey, 8) || '…') AS who,
@@ -91,7 +85,7 @@ export default async function handler(req, res) {
           ${whereRange}
         GROUP BY who
         ORDER BY sats DESC
-        LIMIT ${limit};
+        LIMIT ${limit}
       `;
     }
 
