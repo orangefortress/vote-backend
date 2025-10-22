@@ -1,63 +1,103 @@
-// api/leaderboard.js
+// /api/leaderboard.js
 export const config = { runtime: 'nodejs' };
 
 const { SUPABASE_URL, SUPABASE_SERVICE_ROLE } = process.env;
 
-function bad(res, code, msg){ res.status(code).json({ ok:false, error:msg }); }
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Vary': 'Origin',
+  'Access-Control-Allow-Methods': 'GET,OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+  'Access-Control-Max-Age': '86400',
+};
 
-async function sb(path, init) {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1${path}`, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      apikey: SUPABASE_SERVICE_ROLE,
-      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE}`,
-      ...(init && init.headers),
-    }
-  });
-  const txt = await r.text();
-  let json = null; try { json = txt ? JSON.parse(txt) : null; } catch {}
-  return { ok: r.ok, status: r.status, data: json, raw: txt };
+function send(res, code, body) {
+  Object.entries(corsHeaders).forEach(([k, v]) => res.setHeader(k, v));
+  return res.status(code).json(body);
 }
 
-export default async function handler(req, res){
-  try{
-    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE) return bad(res, 500, 'Missing Supabase env');
+function escLiteral(s = '') {
+  // minimal escape for SQL single-quoted string literal
+  return String(s).replace(/'/g, "''");
+}
 
-    // Optional ?range=24h|7d|30d|all
-    const range = (req.query.range || 'all').toLowerCase();
-    const now = Date.now();
-    const sinceIso =
-      range === '24h' ? new Date(now - 24*60*60*1000).toISOString() :
-      range === '7d'  ? new Date(now - 7*24*60*60*1000).toISOString() :
-      range === '30d' ? new Date(now - 30*24*60*60*1000).toISOString() : null;
+async function execSQL(sql) {
+  const url = `${SUPABASE_URL}/rest/v1/rpc/exec_sql`;
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: {
+      apikey: SUPABASE_SERVICE_ROLE,
+      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ sql }),
+  });
+  const j = await r.json().catch(() => null);
+  if (!r.ok) {
+    const msg = j?.message || 'rpc error';
+    const err = new Error(msg);
+    err.detail = j;
+    throw err;
+  }
+  return j;
+}
 
-    // Pull recent confirmations; we’ll aggregate in JS (robust + RLS-safe).
-    let path = `/confirmed_tips?select=display_name,amount_sats,confirmed_at&order=confirmed_at.desc&limit=2000`;
-    if (sinceIso) path += `&confirmed_at=gte.${encodeURIComponent(sinceIso)}`;
-
-    const resp = await sb(path, { method: 'GET' });
-    if (!resp.ok) {
-      return res.status(500).json({ ok:false, error:'supabase fetch failed', detail: resp.data || resp.raw });
+export default async function handler(req, res) {
+  try {
+    if (req.method === 'OPTIONS') return send(res, 204, null);
+    if (req.method !== 'GET') return send(res, 405, { ok: false, error: 'Method Not Allowed' });
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE) {
+      return send(res, 500, { ok: false, error: 'Missing Supabase env' });
     }
 
-    const rows = Array.isArray(resp.data) ? resp.data : [];
+    // range filter
+    const range = String(req.query.range || 'all').toLowerCase();
+    const whereRange =
+      range === '24h' ? "AND confirmed_at >= now() - interval '24 hours'" :
+      range === '7d'  ? "AND confirmed_at >= now() - interval '7 days'"  :
+      range === '30d' ? "AND confirmed_at >= now() - interval '30 days'" :
+                        '';
 
-    // Aggregate by display_name (fallback to 'Anonymous' if empty/null)
-    const byWho = new Map();
-    for (const r of rows) {
-      const who = (r.display_name && String(r.display_name).trim()) || 'Anonymous';
-      const sats = Number(r.amount_sats || 0);
-      byWho.set(who, (byWho.get(who) || 0) + sats);
+    // target filter (per-image)
+    const target = String(req.query.target || '').toLowerCase();
+    const target_id = String(req.query.target_id || '');
+    const limit = Math.max(1, Math.min(50, Number(req.query.limit || 20)));
+
+    let sql;
+
+    if (target === 'image' && target_id) {
+      // Per-image top tippers (use display_name fallback to pubkey snippet)
+      const tid = escLiteral(target_id);
+      sql = `
+        SELECT
+          COALESCE(NULLIF(display_name,''), LEFT(payer_pubkey, 8) || '…') AS who,
+          SUM(amount_sats)::int AS sats
+        FROM confirmed_tips
+        WHERE target_type = 'image'
+          AND target_id = '${tid}'
+          ${whereRange}
+        GROUP BY who
+        ORDER BY sats DESC
+        LIMIT ${limit};
+      `;
+    } else {
+      // Global top tippers (existing behavior)
+      sql = `
+        SELECT
+          COALESCE(NULLIF(display_name,''), LEFT(payer_pubkey, 8) || '…') AS who,
+          SUM(amount_sats)::int AS sats
+        FROM confirmed_tips
+        WHERE TRUE
+          ${whereRange}
+        GROUP BY who
+        ORDER BY sats DESC
+        LIMIT ${limit};
+      `;
     }
 
-    const top = [...byWho.entries()]
-      .map(([who, sats]) => ({ who, sats }))
-      .sort((a,b)=>b.sats - a.sats)
-      .slice(0, 20);
-
-    res.status(200).json({ ok:true, rows: top });
+    const rows = await execSQL(sql);
+    return send(res, 200, { ok: true, rows });
   } catch (e) {
-    res.status(500).json({ ok:false, error: e.message });
+    return send(res, 500, { ok: false, error: e.message || 'server error', detail: e.detail || null });
   }
 }
