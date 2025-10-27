@@ -17,6 +17,7 @@ function send(res, code, body) {
 }
 
 function escLiteral(s = '') {
+  // minimal single-quote doubling for SQL string literals
   return String(s).replace(/'/g, "''");
 }
 
@@ -48,6 +49,7 @@ export default async function handler(req, res) {
       return send(res, 500, { ok: false, error: 'Missing Supabase env' });
     }
 
+    // ---- filters ----
     const range = String(req.query.range || 'all').toLowerCase();
     const whereRange =
       range === '24h' ? "AND confirmed_at >= now() - interval '24 hours'" :
@@ -55,13 +57,14 @@ export default async function handler(req, res) {
       range === '30d' ? "AND confirmed_at >= now() - interval '30 days'" :
                         '';
 
-    const target = String(req.query.target || '').toLowerCase();
-    const target_id = String(req.query.target || req.query.target_id || '');
-    const limit = Math.max(1, Math.min(50, Number(req.query.limit || 20)));
+    const target    = String(req.query.target || '').toLowerCase(); // '', 'page', 'image'
+    const target_id = String(req.query.target_id || '');            // only used for image
+    const limit     = Math.max(1, Math.min(50, Number(req.query.limit || 20)));
 
     let sql;
 
     if (target === 'image' && target_id) {
+      // per-image leaderboard
       const tid = escLiteral(target_id);
       sql = `
         SELECT
@@ -75,7 +78,21 @@ export default async function handler(req, res) {
         ORDER BY sats DESC
         LIMIT ${limit}
       `;
+    } else if (target === 'page') {
+      // header chip: page tips only
+      sql = `
+        SELECT
+          COALESCE(NULLIF(display_name,''), LEFT(payer_pubkey, 8) || '…') AS who,
+          SUM(amount_sats)::int AS sats
+        FROM confirmed_tips
+        WHERE target_type = 'page'
+          ${whereRange}
+        GROUP BY who
+        ORDER BY sats DESC
+        LIMIT ${limit}
+      `;
     } else {
+      // default: all confirmed tips
       sql = `
         SELECT
           COALESCE(NULLIF(display_name,''), LEFT(payer_pubkey, 8) || '…') AS who,
