@@ -59,7 +59,7 @@ export default async function handler(req, res) {
     // what we’re aggregating: page vs image
     const target = String(req.query.target || '').toLowerCase();
 
-    // ✅ FIX: target_id must come from target_id ONLY (not from target)
+    // ✅ target_id must come ONLY from target_id param
     const rawTargetId = req.query.target_id;
     const target_id =
       typeof rawTargetId === 'string'
@@ -71,7 +71,7 @@ export default async function handler(req, res) {
     let sql;
 
     if (target === 'image' && target_id) {
-      // per-image leaderboard
+      // 🔸 per-image leaderboard (used by mini overlays)
       const tid = escLiteral(target_id);
       sql = `
         SELECT
@@ -86,13 +86,13 @@ export default async function handler(req, res) {
         LIMIT ${limit}
       `;
     } else {
-      // global / page-only leaderboard
+      // 🔸 header leaderboard: ONLY page-level tips
       sql = `
         SELECT
           COALESCE(NULLIF(display_name,''), LEFT(payer_pubkey, 8) || '…') AS who,
           SUM(amount_sats)::int AS sats
         FROM confirmed_tips
-        WHERE TRUE
+        WHERE target_type = 'page'
           ${whereRange}
         GROUP BY who
         ORDER BY sats DESC
