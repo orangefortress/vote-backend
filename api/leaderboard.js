@@ -17,7 +17,6 @@ function send(res, code, body) {
 }
 
 function escLiteral(s = '') {
-  // minimal single-quote doubling for SQL string literals
   return String(s).replace(/'/g, "''");
 }
 
@@ -49,7 +48,7 @@ export default async function handler(req, res) {
       return send(res, 500, { ok: false, error: 'Missing Supabase env' });
     }
 
-    // ---- filters ----
+    // time range filter: all / 24h / 7d / 30d
     const range = String(req.query.range || 'all').toLowerCase();
     const whereRange =
       range === '24h' ? "AND confirmed_at >= now() - interval '24 hours'" :
@@ -57,9 +56,17 @@ export default async function handler(req, res) {
       range === '30d' ? "AND confirmed_at >= now() - interval '30 days'" :
                         '';
 
-    const target    = String(req.query.target || '').toLowerCase(); // '', 'page', 'image'
-    const target_id = String(req.query.target_id || '');            // only used for image
-    const limit     = Math.max(1, Math.min(50, Number(req.query.limit || 20)));
+    // what we’re aggregating: page vs image
+    const target = String(req.query.target || '').toLowerCase();
+
+    // ✅ FIX: target_id must come from target_id ONLY (not from target)
+    const rawTargetId = req.query.target_id;
+    const target_id =
+      typeof rawTargetId === 'string'
+        ? rawTargetId
+        : '';
+
+    const limit = Math.max(1, Math.min(50, Number(req.query.limit || 20)));
 
     let sql;
 
@@ -78,21 +85,8 @@ export default async function handler(req, res) {
         ORDER BY sats DESC
         LIMIT ${limit}
       `;
-    } else if (target === 'page') {
-      // header chip: page tips only
-      sql = `
-        SELECT
-          COALESCE(NULLIF(display_name,''), LEFT(payer_pubkey, 8) || '…') AS who,
-          SUM(amount_sats)::int AS sats
-        FROM confirmed_tips
-        WHERE target_type = 'page'
-          ${whereRange}
-        GROUP BY who
-        ORDER BY sats DESC
-        LIMIT ${limit}
-      `;
     } else {
-      // default: all confirmed tips
+      // global / page-only leaderboard
       sql = `
         SELECT
           COALESCE(NULLIF(display_name,''), LEFT(payer_pubkey, 8) || '…') AS who,
@@ -109,6 +103,10 @@ export default async function handler(req, res) {
     const rows = await execSQL(sql);
     return send(res, 200, { ok: true, rows });
   } catch (e) {
-    return send(res, 500, { ok: false, error: e.message || 'server error', detail: e.detail || null });
+    return send(res, 500, {
+      ok: false,
+      error: e.message || 'server error',
+      detail: e.detail || null
+    });
   }
 }
